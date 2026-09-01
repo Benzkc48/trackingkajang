@@ -517,6 +517,8 @@
       <select id="filterStatus"><option value="">สถานะทั้งหมด</option></select>
       <select id="filterPlatform"><option value="">แพลตฟอร์มทั้งหมด</option></select>
       <span class="spacer"></span>
+      <button class="btn btn-ghost" style="padding:9px 16px" onclick="testConnection()">ทดสอบการเชื่อมต่อ</button>
+      <button class="btn btn-ghost" style="padding:9px 16px" onclick="clearPending()">ล้างรายการที่ค้าง</button>
       <button class="btn btn-ghost" style="padding:9px 16px" onclick="openSheet()">เปิด Google Sheet ↗</button>
       <button class="btn btn-ghost" style="padding:9px 16px" onclick="refreshFromSheet()">รีเฟรชจาก Sheet</button>
       <button class="btn btn-ghost" style="padding:9px 16px" onclick="exportCSV()">ดาวน์โหลด CSV</button>
@@ -625,6 +627,43 @@
   function openSheet(){
     if(!SHEET_URL){ showToast('ยังไม่ได้ตั้งค่าลิงก์ SHEET_URL'); return; }
     window.open(SHEET_URL, '_blank');
+  }
+
+  // ล้างรายการที่ "รอซิงค์" (บันทึกจากเครื่องนี้แต่ยังไม่ยืนยันว่าเข้า Sheet สำเร็จ) ทั้งหมดทิ้ง
+  // ใช้เวลามีรายการค้างจากตอนที่เชื่อมต่อมีปัญหา แล้วอยากเริ่มใหม่ให้สะอาด
+  function clearPending(){
+    const pending = loadLocalItems();
+    if(pending.length === 0){ showToast('ไม่มีรายการค้างอยู่'); return; }
+    if(!confirm('ล้างรายการที่ค้างอยู่ทั้งหมด ' + pending.length + ' รายการ ใช่ไหม?\n(รายการเหล่านี้ยังไม่ยืนยันว่าเข้า Google Sheets สำเร็จ ถ้าล้างแล้วต้องบันทึกใหม่หากยังต้องการงานนั้น)')) return;
+    saveLocalItems([]);
+    renderAll();
+    renderHeroStats();
+    showToast('ล้างรายการที่ค้างแล้ว');
+  }
+
+  // เช็คว่า SCRIPT_URL ต่อกับ Apps Script ได้จริงไหม พร้อมโชว์ error ตรงๆ ถ้าต่อไม่ได้
+  function testConnection(){
+    if(!isOnlineMode()){ showToast('ยังไม่ได้ตั้งค่า SCRIPT_URL — ระบบกำลังทำงานแบบออฟไลน์'); return; }
+    showToast('กำลังทดสอบการเชื่อมต่อ...');
+    fetch(SCRIPT_URL + '?action=list')
+      .then(r => r.text())
+      .then(text => {
+        let res;
+        try{ res = JSON.parse(text); }
+        catch(e){
+          alert('เชื่อมต่อได้ แต่ Apps Script ไม่ได้ตอบกลับเป็น JSON ตามที่ควร (อาจ deploy ยังไม่สำเร็จ หรือโค้ดมี error)\n\nสิ่งที่ได้กลับมา:\n' + text.slice(0, 500));
+          return;
+        }
+        if(res.ok){
+          alert('เชื่อมต่อสำเร็จ ✓\nพบงานทั้งหมด ' + res.items.length + ' รายการใน Sheet\nลิงก์ Sheet: ' + res.url);
+          if(res.url){ SHEET_URL = res.url; localStorage.setItem('contentStudioSheetUrl', res.url); }
+        }else{
+          alert('เชื่อมต่อกับ Apps Script ได้ แต่มีข้อผิดพลาดฝั่งสคริปต์:\n\n' + res.error);
+        }
+      })
+      .catch(err => {
+        alert('เชื่อมต่อ SCRIPT_URL ไม่สำเร็จเลย — ตรวจสอบว่า:\n1. ลิงก์ลงท้ายด้วย /exec\n2. Deploy แบบ Web app แล้ว (Execute as: Me, Who has access: Anyone)\n3. Deploy เวอร์ชันล่าสุดแล้ว (Manage deployments > New version)\n\nรายละเอียด error: ' + err);
+      });
   }
 
   function refreshFromSheet(){
@@ -784,17 +823,23 @@
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'delete', id: id, month: item.month })
     })
-      .then(r => r.json())
-      .then(res => {
+      .then(r => r.text())
+      .then(text => {
+        let res;
+        try{ res = JSON.parse(text); }
+        catch(e){
+          alert('ลบไม่สำเร็จ: Apps Script ไม่ได้ตอบกลับเป็น JSON (อาจ deploy เวอร์ชันเก่าอยู่ ยังไม่มีฟังก์ชันลบ)\n\nลองกด "ทดสอบการเชื่อมต่อ" เพื่อดูรายละเอียด');
+          return;
+        }
         if(res.ok){
           cloudItems = cloudItems.filter(i => i.id !== id);
           showToast('ลบรายการแล้ว');
           renderAll(); renderHeroStats();
         }else{
-          showToast('ลบไม่สำเร็จ: ' + (res.error || ''));
+          alert('ลบไม่สำเร็จ: ' + (res.error || 'ไม่ทราบสาเหตุ'));
         }
       })
-      .catch(() => showToast('เชื่อมต่อ Google Sheets ไม่ได้ ลองใหม่อีกครั้ง'));
+      .catch(err => alert('เชื่อมต่อ Google Sheets ไม่ได้: ' + err));
   }
 
   function renderHeroStats(){
